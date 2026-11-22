@@ -1991,29 +1991,54 @@ function closeWeddingMail(){
   if(burst) burst.classList.remove('active');
 }
 
+/* Хөгжим 1 минут 12 секунд (72 сек)-ээс баталгаатай эхлүүлэх */
 var MUSIC_START_SECONDS = 72;
-var hasSeekedToStart = false;
+var needsStartSeek = true;
 
-function seekMusicToStart(audio){
-  if(!audio) return;
+function applyStartSeek(audio){
+  if(!audio || !needsStartSeek) return false;
   try{
-    if(!hasSeekedToStart && (audio.currentTime < 1 || audio.currentTime < MUSIC_START_SECONDS)){
-      if(audio.seekable && audio.seekable.length > 0){
-        var maxSeek = audio.seekable.end(audio.seekable.length - 1);
-        audio.currentTime = Math.min(MUSIC_START_SECONDS, Math.max(0, maxSeek - 0.5));
-      } else {
-        audio.currentTime = MUSIC_START_SECONDS;
+    if(audio.readyState >= 1 || (audio.seekable && audio.seekable.length > 0)){
+      var target = MUSIC_START_SECONDS;
+      if(audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)){
+        target = Math.min(MUSIC_START_SECONDS, Math.max(0, audio.duration - 0.5));
+      } else if(audio.seekable && audio.seekable.length > 0){
+        var maxEnd = audio.seekable.end(audio.seekable.length - 1);
+        if(maxEnd > 0) target = Math.min(MUSIC_START_SECONDS, maxEnd);
       }
-      hasSeekedToStart = true;
+      audio.currentTime = target;
+      needsStartSeek = false;
+      return true;
     }
   } catch(err){}
+  return false;
 }
 
-(function bindAudioStartPoint(){
+(function bindAudioSeekGuards(){
   var audio = document.getElementById('weddingMusic');
   if(!audio) return;
-  audio.addEventListener('loadedmetadata', function(){
-    seekMusicToStart(audio);
+
+  ['loadedmetadata', 'canplay', 'canplaythrough'].forEach(function(evtName){
+    audio.addEventListener(evtName, function(){
+      applyStartSeek(audio);
+    });
+  });
+
+  audio.addEventListener('playing', function(){
+    if(needsStartSeek){
+      if(!applyStartSeek(audio)){
+        setTimeout(function(){
+          if(needsStartSeek){
+            try{
+              audio.currentTime = MUSIC_START_SECONDS;
+              needsStartSeek = false;
+            } catch(e){}
+          }
+        }, 250);
+      }
+    } else if(audio.currentTime < 2 && audio.duration > MUSIC_START_SECONDS){
+      try{ audio.currentTime = MUSIC_START_SECONDS; } catch(e){}
+    }
   });
 })();
 
@@ -2033,11 +2058,18 @@ function setVinylPlayingState(isPlaying){
 }
 
 function playFromConfiguredStart(audio){
-  seekMusicToStart(audio);
+  applyStartSeek(audio);
   var promise = audio.play();
   if(promise && promise.then){
     promise.then(function(){
-      seekMusicToStart(audio);
+      if(needsStartSeek){
+        setTimeout(function(){
+          try{
+            audio.currentTime = MUSIC_START_SECONDS;
+            needsStartSeek = false;
+          } catch(e){}
+        }, 120);
+      }
       setVinylPlayingState(true);
     }).catch(function(){
       setVinylPlayingState(false);
@@ -2057,8 +2089,8 @@ function toggleVinylMusic(){
   var audio = document.getElementById('weddingMusic');
   if(!audio) return;
   if(audio.paused){
-    if(audio.currentTime < MUSIC_START_SECONDS){
-      hasSeekedToStart = false;
+    if(audio.currentTime < MUSIC_START_SECONDS - 1){
+      needsStartSeek = true;
     }
     playFromConfiguredStart(audio);
   } else {
