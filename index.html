@@ -622,7 +622,7 @@ body{
   color:var(--espresso);
 }
 
-/* Коллаж сүлжээ 2: ХАМГИЙН ГОЛ УРИЛГЫН ХЭСЭГ ("Эрхэм хүндэт таныг...") + Жижиг лацтай дугтуй */
+/* Коллаж сүлжээ 2: ХАМГИЙН ГОЛ УРИЛГЫН ХЭСЭГ + Жижиг лацтай дугтуй */
 .collage-row-2{
   display:grid;
   grid-template-columns:1.24fr 0.84fr;
@@ -1568,7 +1568,7 @@ body{
   <div class="seal-shockwave"></div>
 </div>
 
-<audio id="weddingMusic" src="Hurim.mp3" loop preload="auto"></audio>
+<audio id="weddingMusic" src="Hurim.mp3#t=72" loop preload="auto"></audio>
 
 <!-- 1. НҮҮР ХУУДАС: ГЭРЭЛТЭЙ ЭНГИЙН ДУГТУЙ БА ЛАЦ -->
 <section class="envelope-cover" id="envelopeCover">
@@ -1991,55 +1991,34 @@ function closeWeddingMail(){
   if(burst) burst.classList.remove('active');
 }
 
-/* Хөгжим 1 минут 12 секунд (72 сек)-ээс баталгаатай эхлүүлэх */
+/* Хөгжим 1 минут 12 секунд (72 сек)-ээс 100% баталгаатай эхлүүлэх (Blob + Media Fragment) */
 var MUSIC_START_SECONDS = 72;
-var needsStartSeek = true;
+var musicBlobReady = false;
 
-function applyStartSeek(audio){
-  if(!audio || !needsStartSeek) return false;
-  try{
-    if(audio.readyState >= 1 || (audio.seekable && audio.seekable.length > 0)){
-      var target = MUSIC_START_SECONDS;
-      if(audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)){
-        target = Math.min(MUSIC_START_SECONDS, Math.max(0, audio.duration - 0.5));
-      } else if(audio.seekable && audio.seekable.length > 0){
-        var maxEnd = audio.seekable.end(audio.seekable.length - 1);
-        if(maxEnd > 0) target = Math.min(MUSIC_START_SECONDS, maxEnd);
-      }
-      audio.currentTime = target;
-      needsStartSeek = false;
-      return true;
-    }
-  } catch(err){}
-  return false;
-}
-
-(function bindAudioSeekGuards(){
+(function preloadMusicAsBlob(){
   var audio = document.getElementById('weddingMusic');
-  if(!audio) return;
+  if(!audio || !window.fetch || !window.URL) return;
 
-  ['loadedmetadata', 'canplay', 'canplaythrough'].forEach(function(evtName){
-    audio.addEventListener(evtName, function(){
-      applyStartSeek(audio);
-    });
-  });
-
-  audio.addEventListener('playing', function(){
-    if(needsStartSeek){
-      if(!applyStartSeek(audio)){
-        setTimeout(function(){
-          if(needsStartSeek){
-            try{
-              audio.currentTime = MUSIC_START_SECONDS;
-              needsStartSeek = false;
-            } catch(e){}
-          }
-        }, 250);
-      }
-    } else if(audio.currentTime < 2 && audio.duration > MUSIC_START_SECONDS){
-      try{ audio.currentTime = MUSIC_START_SECONDS; } catch(e){}
-    }
-  });
+  fetch('Hurim.mp3')
+    .then(function(res){
+      if(!res.ok) throw new Error('Audio fetch failed');
+      return res.blob();
+    })
+    .then(function(blob){
+      var wasPlaying = !audio.paused;
+      var blobUrl = URL.createObjectURL(blob);
+      audio.src = blobUrl;
+      musicBlobReady = true;
+      audio.addEventListener('loadedmetadata', function onMeta(){
+        audio.removeEventListener('loadedmetadata', onMeta);
+        try{ audio.currentTime = MUSIC_START_SECONDS; } catch(e){}
+        if(wasPlaying){
+          audio.play().catch(function(){});
+        }
+      });
+      audio.load();
+    })
+    .catch(function(){});
 })();
 
 function setVinylPlayingState(isPlaying){
@@ -2057,42 +2036,27 @@ function setVinylPlayingState(isPlaying){
   }
 }
 
-function playFromConfiguredStart(audio){
-  applyStartSeek(audio);
-  var promise = audio.play();
-  if(promise && promise.then){
-    promise.then(function(){
-      if(needsStartSeek){
-        setTimeout(function(){
-          try{
-            audio.currentTime = MUSIC_START_SECONDS;
-            needsStartSeek = false;
-          } catch(e){}
-        }, 120);
-      }
-      setVinylPlayingState(true);
-    }).catch(function(){
-      setVinylPlayingState(false);
-    });
-  } else {
-    setVinylPlayingState(true);
-  }
-}
-
 function startWeddingMusic(){
   var audio = document.getElementById('weddingMusic');
   if(!audio) return;
-  playFromConfiguredStart(audio);
+  if(audio.currentTime < MUSIC_START_SECONDS){
+    try{ audio.currentTime = MUSIC_START_SECONDS; } catch(e){}
+  }
+  audio.play().then(function(){
+    if(audio.currentTime < MUSIC_START_SECONDS){
+      try{ audio.currentTime = MUSIC_START_SECONDS; } catch(e){}
+    }
+    setVinylPlayingState(true);
+  }).catch(function(){
+    setVinylPlayingState(false);
+  });
 }
 
 function toggleVinylMusic(){
   var audio = document.getElementById('weddingMusic');
   if(!audio) return;
   if(audio.paused){
-    if(audio.currentTime < MUSIC_START_SECONDS - 1){
-      needsStartSeek = true;
-    }
-    playFromConfiguredStart(audio);
+    startWeddingMusic();
   } else {
     audio.pause();
     setVinylPlayingState(false);
